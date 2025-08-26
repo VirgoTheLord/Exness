@@ -2,14 +2,24 @@ import { WebSocketServer, WebSocket } from "ws";
 import express from "express";
 import cors from "cors";
 import pkg from "pg";
+import Redis from "ioredis";
+
+//client from pg
 const { Client } = pkg;
+
+//binance url
 const url = "wss://stream.binance.com:9443/ws/solusdt@trade";
 
+//test dw
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-const wss = new WebSocketServer({ port: 2000 });
+//ws
+// const wss = new WebSocketServer({ port: 2000 });
+
+//redis
+const redis = new Redis();
 
 const client = new Client({
   host: "localhost",
@@ -19,6 +29,7 @@ const client = new Client({
   database: "mydb",
 });
 
+//this function is to create initial postgres table and populate and create the hypertable also checks if exists for reusabliltiy.
 async function setup() {
   await client.connect();
   console.log("Connected to TimeScaleDB");
@@ -36,19 +47,19 @@ async function setup() {
   await client.query(`
     SELECT create_hypertable('trades', 'time', if_not_exists => TRUE);
   `);
-
   console.log("Table Ready");
 }
 
+//actual worker function that sends the data to the database with the ws
 async function start() {
   await setup();
-  wss.on("connection", (ws) => {
-    console.log("Client Connected");
+  // wss.on("connection", (ws) => {
+  //   console.log("Client Connected");
 
-    ws.on("close", () => {
-      console.log("Client Closed");
-    });
-  });
+  //   ws.on("close", () => {
+  //     console.log("Client Closed");
+  //   });
+  // });
 
   const binanceWs = new WebSocket(url);
 
@@ -57,27 +68,29 @@ async function start() {
     INSERT INTO trades (time, trade_id, price, quantity, is_buyer_maker)
     VALUES (to_timestamp($1 / 1000.0), $2, $3, $4, $5)
   `;
-
+  //batching updated for 10sc then sending afterwards
   setInterval(async () => {
     console.log(pendingUpdates.length);
     while (pendingUpdates.length > 0) {
-      const trade = pendingUpdates.shift();
-      await client.query(query, [trade.T, trade.t, trade.p, trade.q, trade.m]);
+      const currentTrade = pendingUpdates.shift();
+      await client.query(query, [
+        currentTrade.T,
+        currentTrade.t,
+        currentTrade.p,
+        currentTrade.q,
+        currentTrade.m,
+      ]);
+
+      redis.publish("trades", JSON.stringify(currentTrade));
     }
 
     pendingUpdates = [];
   }, 10000);
 
-  binanceWs.on("message", async (msg) => {
-    const trade = JSON.parse(msg.toString());
+  binanceWs.onmessage = (event) => {
+    const trade = JSON.parse(event.data.toString());
     pendingUpdates.push(trade);
-
-    wss.clients.forEach((c) => {
-      if (c.readyState === WebSocket.OPEN) {
-        c.send(JSON.stringify(trade));
-      }
-    });
-  });
+  };
 }
 
 start().catch((err) => {
