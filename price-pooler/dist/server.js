@@ -4,9 +4,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const ws_1 = require("ws");
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const pg_1 = __importDefault(require("pg"));
 const { Client } = pg_1.default;
 const url = "wss://stream.binance.com:9443/ws/solusdt@trade";
+const app = (0, express_1.default)();
+app.use(express_1.default.json());
+app.use((0, cors_1.default)());
 const wss = new ws_1.WebSocketServer({ port: 2000 });
 const client = new Client({
     host: "localhost",
@@ -66,4 +71,27 @@ async function start() {
 }
 start().catch((err) => {
     console.log(err);
+});
+app.get("/timechunks/:interval", async (req, res) => {
+    try {
+        const { interval } = req.params;
+        const result = await client.query(`
+      SELECT 
+        time_bucket($1, time) AS bucket,
+        first(price::numeric, time) AS open,
+        MAX(price::numeric) AS high,
+        MIN(price::numeric) AS low,
+        last(price::numeric, time) AS close,
+        SUM(quantity::numeric) AS volume
+      FROM trades
+      GROUP BY bucket
+      ORDER BY bucket DESC
+      LIMIT 50;
+      `, [interval]);
+        res.json(result.rows);
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Error fetching timechunks" });
+    }
 });
