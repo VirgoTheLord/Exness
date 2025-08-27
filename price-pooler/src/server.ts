@@ -1,6 +1,4 @@
 import { WebSocket } from "ws";
-import express from "express";
-import cors from "cors";
 import pkg from "pg";
 import Redis from "ioredis";
 
@@ -9,10 +7,6 @@ const { Client } = pkg;
 const markets = ["btcusdt", "ethusdt", "solusdt"];
 const streams = markets.map((m) => `${m}@trade`).join("/");
 const url = `wss://stream.binance.com:9443/stream?streams=${streams}`;
-
-const app = express();
-app.use(express.json());
-app.use(cors());
 
 const redis = new Redis();
 
@@ -123,43 +117,4 @@ async function start() {
 
 start().catch((err) => {
   console.log(err);
-});
-
-app.get("/candles/:symbol/:interval", async (req, res) => {
-  const { symbol, interval } = req.params;
-
-  const viewMap: Record<string, string> = {
-    "1m": "trades_1m",
-    "5m": "trades_5m",
-    "10m": "trades_10m",
-    "30m": "trades_30m",
-  };
-
-  const view = viewMap[interval];
-  if (!view) {
-    return res
-      .status(400)
-      .json({ error: "Invalid interval. Use 1m, 5m, 10m, or 30m" });
-  }
-
-  try {
-    const result = await client.query(
-      `SELECT timestamp, symbol, open_price, close_price, high_price, low_price
-       FROM ${view}
-       WHERE symbol = $1
-       ORDER BY timestamp DESC
-       LIMIT 100`,
-      [symbol.toUpperCase()]
-    );
-
-    res.json(result.rows.reverse());
-  } catch (err) {
-    console.error("Error fetching candles:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-const PORT = 2000;
-app.listen(PORT, () => {
-  console.log(`HTTP server running on port ${PORT}`);
 });

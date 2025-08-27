@@ -11,8 +11,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@types/typescript": "^0.4.29",
     "@types/ws": "^8.18.1",
     "ioredis": "^5.7.0",
+    "typescript": "^5.9.2",
     "ws": "^8.18.3"
   }
 }
