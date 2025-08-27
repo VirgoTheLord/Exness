@@ -6,7 +6,9 @@ import Redis from "ioredis";
 
 const { Client } = pkg;
 
-const url = "wss://stream.binance.com:9443/ws/solusdt@trade";
+const markets = ["btcusdt", "ethusdt", "solusdt"];
+const streams = markets.map((m) => `${m}@trade`).join("/");
+const url = `wss://stream.binance.com:9443/stream?streams=${streams}`;
 
 const app = express();
 app.use(express.json());
@@ -29,99 +31,45 @@ async function setup() {
   await client.query(`
     CREATE TABLE IF NOT EXISTS trades (
       time TIMESTAMPTZ NOT NULL,
+      symbol TEXT NOT NULL,
       trade_id BIGINT,
       price NUMERIC,
       quantity NUMERIC,
-      is_buyer_maker BOOLEAN,
-      asset TEXT
+      is_buyer_maker BOOLEAN
     );
   `);
 
-  await client.query(`
-    SELECT create_hypertable('trades', 'time', if_not_exists => TRUE);
-  `);
+  await client.query(
+    `SELECT create_hypertable('trades', 'time', if_not_exists => TRUE);`
+  );
 
-  await client.query(`
-    CREATE MATERIALIZED VIEW trades_1m WITH (timescaledb.continuous) AS 
-    SELECT time_bucket('1 minute', time) AS timestamp,
-           asset,
-           FIRST(price, time) AS open_price, 
-           LAST(price, time) AS close_price, 
-           MAX(price) AS high_price, 
-           MIN(price) AS low_price 
-    FROM trades 
-    GROUP BY timestamp, asset;
-  `);
-  await client.query(`
-    SELECT add_continuous_aggregate_policy(
-      'trades_1m',
-      start_offset => INTERVAL '1 day',
-      end_offset   => INTERVAL '1 minute',
-      schedule_interval => INTERVAL '1 minute'
-    );
-  `);
+  const intervals = ["1m", "5m", "10m", "30m"];
 
-  await client.query(`
-    CREATE MATERIALIZED VIEW trades_5m WITH (timescaledb.continuous) AS 
-    SELECT time_bucket('5 minute', time) AS timestamp,
-           asset,
-           FIRST(price, time) AS open_price, 
-           LAST(price, time) AS close_price, 
-           MAX(price) AS high_price, 
-           MIN(price) AS low_price 
-    FROM trades 
-    GROUP BY timestamp, asset;
-  `);
-  await client.query(`
-    SELECT add_continuous_aggregate_policy(
-      'trades_5m',
-      start_offset => INTERVAL '1 day',
-      end_offset   => INTERVAL '1 minute',
-      schedule_interval => INTERVAL '1 minute'
-    );
-  `);
+  for (const interval of intervals) {
+    await client.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS trades_${interval} WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('${interval.replace("m", " minute")}', time) AS timestamp,
+        symbol,
+        FIRST(price, time) AS open_price,
+        LAST(price, time) AS close_price,
+        MAX(price) AS high_price,
+        MIN(price) AS low_price
+      FROM trades
+      GROUP BY timestamp, symbol;
+    `);
 
-  await client.query(`
-    CREATE MATERIALIZED VIEW trades_10m WITH (timescaledb.continuous) AS 
-    SELECT time_bucket('10 minute', time) AS timestamp,
-           asset,
-           FIRST(price, time) AS open_price, 
-           LAST(price, time) AS close_price, 
-           MAX(price) AS high_price, 
-           MIN(price) AS low_price 
-    FROM trades 
-    GROUP BY timestamp, asset;
-  `);
-  await client.query(`
-    SELECT add_continuous_aggregate_policy(
-      'trades_10m',
-      start_offset => INTERVAL '1 day',
-      end_offset   => INTERVAL '1 minute',
-      schedule_interval => INTERVAL '1 minute'
-    );
-  `);
+    await client.query(`
+      SELECT add_continuous_aggregate_policy(
+        'trades_${interval}',
+        start_offset => INTERVAL '1 day',
+        end_offset   => INTERVAL '1 minute',
+        schedule_interval => INTERVAL '1 minute'
+      );
+    `);
+  }
 
-  await client.query(`
-    CREATE MATERIALIZED VIEW trades_30m WITH (timescaledb.continuous) AS 
-    SELECT time_bucket('30 minute', time) AS timestamp,
-           asset,
-           FIRST(price, time) AS open_price, 
-           LAST(price, time) AS close_price, 
-           MAX(price) AS high_price, 
-           MIN(price) AS low_price 
-    FROM trades 
-    GROUP BY timestamp, asset;
-  `);
-  await client.query(`
-    SELECT add_continuous_aggregate_policy(
-      'trades_30m',
-      start_offset => INTERVAL '1 day',
-      end_offset   => INTERVAL '1 minute',
-      schedule_interval => INTERVAL '1 minute'
-    );
-  `);
-
-  console.log("Table Ready");
+  console.log("Tables and views are ready");
 }
 
 async function start() {
@@ -129,42 +77,61 @@ async function start() {
 
   const binanceWs = new WebSocket(url);
 
-  let pendingUpdates: any[] = [];
+  let pendingUpdates: { trade: any; symbol: string }[] = [];
+
   const query = `
-    INSERT INTO trades (time, trade_id, price, quantity, is_buyer_maker,asset)
-    VALUES (to_timestamp($1 / 1000.0), $2, $3, $4, $5,$6)
+    INSERT INTO trades (time, trade_id, price, quantity, is_buyer_maker, symbol)
+    VALUES (to_timestamp($1 / 1000.0), $2, $3, $4, $5, $6)
   `;
+
   setInterval(async () => {
-    console.log(pendingUpdates.length);
-    while (pendingUpdates.length > 0) {
-      const currentTrade = pendingUpdates.shift();
-      await client.query(query, [
-        currentTrade.T,
-        currentTrade.t,
-        currentTrade.p,
-        currentTrade.q,
-        currentTrade.m,
-        "SOLUSDT",
-      ]);
+    if (pendingUpdates.length === 0) return;
+    console.log(`Processing ${pendingUpdates.length} trades...`);
 
-      redis.publish("trades", JSON.stringify(currentTrade));
+    const batch = pendingUpdates.splice(0, pendingUpdates.length);
+
+    for (const update of batch) {
+      const { trade, symbol } = update;
+      try {
+        await client.query(query, [
+          trade.T,
+          trade.t,
+          trade.p,
+          trade.q,
+          trade.m,
+          symbol,
+        ]);
+      } catch (err) {
+        console.error("Error inserting trade:", err);
+      }
     }
-
-    pendingUpdates = [];
   }, 10000);
 
   binanceWs.onmessage = (event) => {
-    const trade = JSON.parse(event.data.toString());
-    pendingUpdates.push(trade);
+    const message = JSON.parse(event.data.toString());
+    if (message.stream && message.data) {
+      const symbol = message.stream.split("@")[0].toUpperCase();
+      const trade = message.data;
+      pendingUpdates.push({ trade, symbol });
+      redis.publish("trades", JSON.stringify({ ...trade, symbol }));
+    }
   };
+
+  binanceWs.on("open", () => {
+    console.log("Connected to Binance WebSocket for:", markets.join(", "));
+  });
+
+  binanceWs.on("error", (err) => {
+    console.error("WebSocket error:", err);
+  });
 }
 
 start().catch((err) => {
-  console.log(err);
+  console.error("Failed to start application:", err);
 });
 
-app.get("/candles/:interval", async (req, res) => {
-  const { interval } = req.params;
+app.get("/candles/:symbol/:interval", async (req, res) => {
+  const { symbol, interval } = req.params;
 
   const viewMap: Record<string, string> = {
     "1m": "trades_1m",
@@ -177,16 +144,17 @@ app.get("/candles/:interval", async (req, res) => {
   if (!view) {
     return res
       .status(400)
-      .json({ error: "Invalid interval. Use 1m, 5m, 10m, 30m" });
+      .json({ error: "Invalid interval. Use 1m, 5m, 10m, or 30m" });
   }
 
   try {
     const result = await client.query(
-      `SELECT timestamp, asset, open_price, close_price, high_price, low_price
+      `SELECT timestamp, symbol, open_price, close_price, high_price, low_price
        FROM ${view}
-       WHERE asset = 'SOLUSDT'
+       WHERE symbol = $1
        ORDER BY timestamp DESC
-       LIMIT 100`
+       LIMIT 100`,
+      [symbol.toUpperCase()]
     );
 
     res.json(result.rows.reverse());

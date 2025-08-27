@@ -1,6 +1,6 @@
 import { WebSocket, WebSocketServer } from "ws";
 import Redis from "ioredis";
-const wss = new WebSocketServer({ port: 3000 });
+const wss = new WebSocketServer({ port: 4000 });
 const redis = new Redis();
 
 wss.on("connection", (ws) => {
