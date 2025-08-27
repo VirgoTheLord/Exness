@@ -68,8 +68,6 @@ async function setup() {
       );
     `);
   }
-
-  console.log("Tables and views are ready");
 }
 
 async function start() {
@@ -85,9 +83,6 @@ async function start() {
   `;
 
   setInterval(async () => {
-    if (pendingUpdates.length === 0) return;
-    console.log(`Processing ${pendingUpdates.length} trades...`);
-
     const batch = pendingUpdates.splice(0, pendingUpdates.length);
 
     for (const update of batch) {
@@ -127,7 +122,7 @@ async function start() {
 }
 
 start().catch((err) => {
-  console.error("Failed to start application:", err);
+  console.log(err);
 });
 
 app.get("/candles/:symbol/:interval", async (req, res) => {

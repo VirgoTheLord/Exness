@@ -30,10 +30,24 @@ const CandlePage = () => {
     BTCUSDT: { lastPrice: null, prevPrice: null },
     ETHUSDT: { lastPrice: null, prevPrice: null },
   });
+  const [quantity, setQuantity] = useState(0);
+  const [balance, setBalance] = useState(0);
 
   const markets = ["SOLUSDT", "BTCUSDT", "ETHUSDT"];
   const intervals = ["1m", "5m", "10m", "30m"];
 
+  const handleBuy = (
+    marketData: Record<string, MarketData>,
+    market: string
+  ) => {
+    let buyingPrice = marketData[market].lastPrice || 0;
+    let buyamount = buyingPrice * quantity;
+
+    let mainbalance = balance - buyamount;
+    setBalance(mainbalance + quantity * buyingPrice);
+  };
+
+  //good logic to fetch lets the candles and an inefficient polling thing
   useEffect(() => {
     const fetchCandles = async () => {
       try {
@@ -42,7 +56,7 @@ const CandlePage = () => {
         );
         const data: Candle[] = await res.json();
 
-        if (Array.isArray(data) && data.length > 0) {
+        if (data.length > 0) {
           const formatted = data.map((c) => ({
             x: new Date(c.timestamp),
             y: [
@@ -53,15 +67,6 @@ const CandlePage = () => {
             ] as [number, number, number, number],
           }));
           setCandles(formatted);
-          const lastCandle = formatted[formatted.length - 1];
-          const closePrice = lastCandle.y[3];
-          setMarketData((prevData) => ({
-            ...prevData,
-            [selectedSymbol]: {
-              lastPrice: closePrice,
-              prevPrice: prevData[selectedSymbol]?.lastPrice || closePrice,
-            },
-          }));
         } else {
           setCandles([]);
         }
@@ -82,17 +87,15 @@ const CandlePage = () => {
     ws.onmessage = (event) => {
       const trade = JSON.parse(event.data);
       const newPrice = parseFloat(trade.p);
-      const symbol = trade.symbol;
+      const symbol = trade.s;
 
-      if (symbol in marketData) {
-        setMarketData((prevData) => ({
-          ...prevData,
-          [symbol]: {
-            lastPrice: newPrice,
-            prevPrice: prevData[symbol].lastPrice,
-          },
-        }));
-      }
+      setMarketData((prev) => ({
+        ...prev,
+        [symbol]: {
+          lastPrice: newPrice,
+          prevPrice: prev[symbol]?.lastPrice || newPrice,
+        },
+      }));
     };
 
     return () => ws.close();
