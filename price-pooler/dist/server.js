@@ -88,8 +88,15 @@ async function start() {
         if (message.stream && message.data) {
             const symbol = message.stream.split("@")[0].toUpperCase();
             const trade = message.data;
-            pendingUpdates.push({ trade, symbol });
-            redis.publish("trades", JSON.stringify({ ...trade, symbol }));
+            const price = parseFloat(trade.p);
+            // 2.5% spread
+            const spread = 0.025;
+            const ask = price * (1 + spread / 2); // buy price
+            const bid = price * (1 - spread / 2); // sell price
+            // Attach ask/bid to the published message
+            const tradeWithSpread = { ...trade, symbol, ask, bid };
+            pendingUpdates.push({ trade: tradeWithSpread, symbol });
+            redis.publish("trades", JSON.stringify(tradeWithSpread));
         }
     };
     binanceWs.on("open", () => {

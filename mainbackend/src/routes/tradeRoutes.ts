@@ -13,6 +13,7 @@ interface Holding {
   qty: number;
   type: "buy" | "sell";
   startBalance: number;
+  buyPrice: number; // store ask price at buy
 }
 
 export const userBalances: Balance = {
@@ -21,36 +22,44 @@ export const userBalances: Balance = {
 
 const userHoldings: Record<string, Holding[]> = {};
 
-const latestPrices: Record<string, number> = {};
+// latest ask/bid prices from stream
+const latestAsk: Record<string, number> = {};
+const latestBid: Record<string, number> = {};
 
 redis.subscribe("trades");
 redis.on("message", (channel, message) => {
   if (channel === "trades") {
     try {
       const trade = JSON.parse(message);
-      const symbol = trade.s;
-      const price = parseFloat(trade.p);
+      const symbol = trade.s.toUpperCase();
+      const ask = parseFloat(trade.ask); // buy price
+      const bid = parseFloat(trade.bid); // sell price
 
-      if (symbol && price) {
-        latestPrices[symbol.toUpperCase()] = price;
+      if (symbol && !isNaN(ask) && !isNaN(bid)) {
+        latestAsk[symbol] = ask;
+        latestBid[symbol] = bid;
       }
-    } catch {}
+    } catch (err) {
+      console.error("Error parsing trade message:", err);
+    }
   }
 });
 
+// BUY route
 tradeRouter.post("/buy", (req, res) => {
   const { user, symbol, quantity } = req.body;
+  const sym = symbol.toUpperCase();
 
-  const price = latestPrices[symbol.toUpperCase()];
-  if (!price) {
-    return res.status(400).json({ error: "No price available for " + symbol });
+  const askPrice = latestAsk[sym];
+  if (!askPrice) {
+    return res.status(400).json({ error: "No ask price available for " + sym });
   }
 
-  const cost = price * quantity;
   if (userBalances[user] === undefined) {
     userBalances[user] = 10000;
   }
 
+  const cost = askPrice * quantity;
   if (userBalances[user] < cost) {
     return res.status(400).json({ error: "Insufficient balance" });
   }
@@ -59,56 +68,121 @@ tradeRouter.post("/buy", (req, res) => {
 
   if (!userHoldings[user]) userHoldings[user] = [];
   userHoldings[user].push({
-    symbol,
+    symbol: sym,
     qty: quantity,
     type: "buy",
     startBalance: userBalances[user],
+    buyPrice: askPrice,
   });
 
   return res.json({
     user,
-    symbol,
+    symbol: sym,
     quantity,
-    price,
+    buyPrice: askPrice,
     remainingBalance: userBalances[user],
   });
 });
 
+// CLOSE route
 tradeRouter.post("/close", (req, res) => {
   const { user, symbol } = req.body;
+  const sym = symbol.toUpperCase();
 
   if (!userHoldings[user] || userHoldings[user].length === 0) {
     return res.status(400).json({ error: "No active holdings found" });
   }
 
-  const holdingIndex = userHoldings[user].findIndex(
-    (h) => h.symbol.toUpperCase() === symbol.toUpperCase()
-  );
+  const holdingIndex = userHoldings[user].findIndex((h) => h.symbol === sym);
 
   if (holdingIndex === -1) {
-    return res.status(400).json({ error: "No active holding for " + symbol });
+    return res.status(400).json({ error: "No active holding for " + sym });
   }
 
   const holding = userHoldings[user][holdingIndex];
-  const currentPrice = latestPrices[symbol.toUpperCase()];
+  const bidPrice = latestBid[sym];
 
-  if (!currentPrice) {
-    return res.status(400).json({ error: "No current price for " + symbol });
+  if (!bidPrice) {
+    return res.status(400).json({ error: "No bid price available for " + sym });
   }
 
-  let finalBalance = holding.startBalance + holding.qty * currentPrice;
+  const finalBalance = userBalances[user] + bidPrice * holding.qty;
 
   userBalances[user] = finalBalance;
-
   userHoldings[user].splice(holdingIndex, 1);
 
   return res.json({
     user,
-    symbol,
+    symbol: sym,
     qty: holding.qty,
+    buyPrice: holding.buyPrice,
+    sellPrice: bidPrice,
     finalBalance,
-    price: currentPrice,
   });
+});
+// SELL route — user wants to sell a quantity of an existing holding
+tradeRouter.post("/sell", (req, res) => {
+  const { user, symbol, quantity } = req.body;
+  const sym = symbol.toUpperCase();
+
+  if (!userHoldings[user] || userHoldings[user].length === 0) {
+    return res.status(400).json({ error: "No active holdings found" });
+  }
+
+  // Find the user's holding for this symbol
+  const holdingIndex = userHoldings[user].findIndex(
+    (h) => h.symbol === sym && h.type === "buy"
+  );
+
+  if (holdingIndex === -1) {
+    return res.status(400).json({ error: "No active holding for " + sym });
+  }
+
+  const holding = userHoldings[user][holdingIndex];
+
+  if (quantity > holding.qty) {
+    return res.status(400).json({ error: "Sell quantity exceeds holding" });
+  }
+
+  const bidPrice = latestBid[sym];
+  if (!bidPrice) {
+    return res.status(400).json({ error: "No bid price available for " + sym });
+  }
+
+  // Calculate proceeds from sale at bid
+  const saleProceeds = bidPrice * quantity;
+
+  // Update user balance
+  userBalances[user] += saleProceeds;
+
+  // Reduce or remove holding
+  if (quantity === holding.qty) {
+    // sold entire holding
+    userHoldings[user].splice(holdingIndex, 1);
+  } else {
+    // partial sale
+    userHoldings[user][holdingIndex].qty -= quantity;
+  }
+
+  return res.json({
+    user,
+    symbol: sym,
+    soldQty: quantity,
+    sellPrice: bidPrice,
+    remainingQty: userHoldings[user][holdingIndex]?.qty ?? 0,
+    updatedBalance: userBalances[user],
+  });
+});
+
+tradeRouter.get("/balance", (req, res) => {
+  const user = req.query.user as string;
+  if (!user) {
+    return res.status(400).json({ message: "User Required" });
+  }
+  if (userBalances[user] === undefined) {
+    userBalances[user] = 10000;
+  }
+  return res.json({ user, balance: userBalances[user] });
 });
 
 export default tradeRouter;

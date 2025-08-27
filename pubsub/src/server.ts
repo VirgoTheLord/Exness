@@ -3,18 +3,6 @@ import Redis from "ioredis";
 const wss = new WebSocketServer({ port: 4000 });
 const redis = new Redis();
 
-wss.on("connection", (ws) => {
-  console.log("Wesocket connection established.");
-
-  ws.on("open", () => {
-    console.log("Websocket opened");
-  });
-
-  ws.on("close", () => {
-    console.log("Client Disconnected");
-  });
-});
-
 redis.subscribe("trades", (error) => {
   if (error) {
     console.log(error);

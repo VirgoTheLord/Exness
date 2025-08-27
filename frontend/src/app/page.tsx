@@ -16,7 +16,10 @@ interface Candle {
 
 interface MarketData {
   lastPrice: number | null;
-  prevPrice: number | null;
+  ask?: number;
+  bid?: number;
+  prevAsk?: number;
+  prevBid?: number;
 }
 
 const CandlePage = () => {
@@ -26,13 +29,13 @@ const CandlePage = () => {
   const [selectedSymbol, setSelectedSymbol] = useState("SOLUSDT");
   const [selectedInterval, setSelectedInterval] = useState("1m");
   const [marketData, setMarketData] = useState<Record<string, MarketData>>({
-    SOLUSDT: { lastPrice: null, prevPrice: null },
-    BTCUSDT: { lastPrice: null, prevPrice: null },
-    ETHUSDT: { lastPrice: null, prevPrice: null },
+    SOLUSDT: { lastPrice: null },
+    BTCUSDT: { lastPrice: null },
+    ETHUSDT: { lastPrice: null },
   });
   const [quantity, setQuantity] = useState(0);
-  const [balance, setBalance] = useState(10000);
-  const [liveBalance, setLiveBalance] = useState(balance);
+  const [balance, setBalance] = useState(0);
+  const [liveBalance, setLiveBalance] = useState(0);
   const [holdings, setHoldings] = useState<{
     symbol: string;
     qty: number;
@@ -41,7 +44,29 @@ const CandlePage = () => {
   const markets = ["SOLUSDT", "BTCUSDT", "ETHUSDT"];
   const intervals = ["1m", "5m", "10m", "30m"];
 
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        const res = await fetch(
+          "http://localhost:9000/user/balance?user=user1"
+        );
+        const data = await res.json();
+        if (res.ok) {
+          setBalance(data.balance);
+          setLiveBalance(data.balance);
+        } else {
+          console.error("Failed to fetch balance:", data.error);
+        }
+      } catch (err) {
+        console.error("Balance fetch error:", err);
+      }
+    };
+
+    fetchBalance();
+  }, []);
+
   const handleBuy = async () => {
+    if (quantity <= 0) return;
     try {
       const res = await fetch("http://localhost:9000/trade/buy", {
         method: "POST",
@@ -126,24 +151,29 @@ const CandlePage = () => {
     return () => clearInterval(intervalId);
   }, [selectedSymbol, selectedInterval]);
 
+  // WebSocket for live ask/bid directly from stream
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:4000");
 
     ws.onmessage = (event) => {
       const trade = JSON.parse(event.data);
-      const newPrice = parseFloat(trade.p);
       const symbol = trade.s;
+      const ask = parseFloat(trade.ask);
+      const bid = parseFloat(trade.bid);
 
       setMarketData((prev) => ({
         ...prev,
         [symbol]: {
-          lastPrice: newPrice,
-          prevPrice: prev[symbol]?.lastPrice || newPrice,
+          lastPrice: parseFloat(trade.p),
+          prevAsk: prev[symbol]?.ask ?? ask,
+          prevBid: prev[symbol]?.bid ?? bid,
+          ask,
+          bid,
         },
       }));
 
-      if (holdings && holdings.symbol === symbol) {
-        setLiveBalance(balance + holdings.qty * newPrice);
+      if (holdings && holdings.symbol === symbol && bid) {
+        setLiveBalance(balance + holdings.qty * bid);
       }
     };
 
@@ -164,6 +194,7 @@ const CandlePage = () => {
     <div className="bg-neutral-900 w-screen h-screen">
       <Navbar />
       <div className="p-4 flex gap-4">
+        {/* Candlestick chart */}
         <div className="flex-1 bg-black p-5 rounded-md">
           <div className="flex justify-end mb-4 items-center">
             <div>
@@ -194,11 +225,13 @@ const CandlePage = () => {
           )}
         </div>
 
+        {/* Sidebar */}
         <div className="w-72 bg-black p-4 rounded text-white flex flex-col space-y-4">
           <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
             Balance: ${liveBalance.toFixed(2)}
           </h3>
 
+          {/* Buy Section */}
           <div className="space-y-2">
             <label className="block text-sm">Quantity:</label>
             <input
@@ -215,6 +248,7 @@ const CandlePage = () => {
             </button>
           </div>
 
+          {/* Holdings Section */}
           {holdings && (
             <div className="mt-4 border-t border-neutral-700 pt-3">
               <p>
@@ -229,40 +263,55 @@ const CandlePage = () => {
             </div>
           )}
 
+          {/* Markets Table */}
           <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
             Markets
           </h3>
-          {["SOLUSDT", "BTCUSDT", "ETHUSDT"].map((symbol) => {
-            const data = marketData[symbol];
-            const lastPrice = data.lastPrice;
-            const prevPrice = data.prevPrice;
+          <div className="space-y-2">
+            {markets.map((symbol) => {
+              const data = marketData[symbol];
+              const ask = data.ask;
+              const bid = data.bid;
+              const prevAsk = data.prevAsk;
+              const prevBid = data.prevBid;
 
-            const priceColor =
-              prevPrice !== null && lastPrice !== null
-                ? lastPrice > prevPrice
-                  ? "text-green-500"
-                  : "text-red-500"
-                : "text-neutral-400";
+              const askColor =
+                ask && prevAsk
+                  ? ask > prevAsk
+                    ? "text-green-500"
+                    : "text-red-500"
+                  : "text-neutral-400";
+              const bidColor =
+                bid && prevBid
+                  ? bid > prevBid
+                    ? "text-green-500"
+                    : "text-red-500"
+                  : "text-neutral-400";
 
-            return (
-              <div
-                key={symbol}
-                onClick={() => setSelectedSymbol(symbol)}
-                className={`p-3 rounded-md cursor-pointer transition-all ${
-                  selectedSymbol === symbol
-                    ? "bg-blue-600/20 border border-blue-500"
-                    : "bg-neutral-800/50 hover:bg-neutral-700/50 border border-transparent"
-                }`}
-              >
-                <div className="flex justify-between">
-                  <span>{symbol}</span>
-                  <span className={`font-mono ${priceColor}`}>
-                    {lastPrice !== null ? lastPrice.toFixed(2) : "..."}
-                  </span>
+              return (
+                <div
+                  key={symbol}
+                  onClick={() => setSelectedSymbol(symbol)}
+                  className={`p-2 rounded-md cursor-pointer border border-neutral-700 hover:bg-neutral-800/50`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-semibold">{symbol}</span>
+                    <span className="text-sm font-mono">
+                      Last: {data.lastPrice?.toFixed(2) ?? "..."}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm font-mono">
+                    <span className={askColor}>
+                      Ask: {ask?.toFixed(2) ?? "..."}
+                    </span>
+                    <span className={bidColor}>
+                      Bid: {bid?.toFixed(2) ?? "..."}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
