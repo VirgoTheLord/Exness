@@ -6,7 +6,7 @@ const { Pool } = pkg;
 const redis = new Redis();
 
 const markets = ["SOLUSDT", "ETHUSDT", "BTCUSDT"];
-const stream = markets.map((m) => `${m}@trade`).join("/");
+const stream = markets.map((m) => `${m.toLowerCase()}@trade`).join("/");
 const url = `wss://stream.binance.com:9443/stream?streams=${stream}`;
 
 const pool = new Pool({
@@ -32,6 +32,8 @@ const updates: { trade: any }[] = [];
 
 setInterval(async () => {
   const batch = updates.splice(0, updates.length);
+  console.log(batch.length);
+
   for (const update of batch) {
     const { trade } = update;
     try {
@@ -51,6 +53,7 @@ setInterval(async () => {
 tradeWs.onmessage = (incoming) => {
   const message = JSON.parse(incoming.data.toString());
   //stream to say which market and data the actual trade data
+
   if (message.data && message.stream) {
     const symbol = message.stream.split("@")[0].toUpperCase();
     const trade = message.data;

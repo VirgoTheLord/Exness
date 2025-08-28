@@ -1,4 +1,5 @@
 -- initial dump table
+-- TIMESTAMPTZ attempts to get the time from UTC and convert to client time zone
 CREATE TABLE IF NOT EXISTS trades (
     time TIMESTAMPTZ NOT NULL,
     symbol TEXT NOT NULL,

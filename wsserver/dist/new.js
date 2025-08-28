@@ -7,18 +7,18 @@ const ws_1 = require("ws");
 const ioredis_1 = __importDefault(require("ioredis"));
 const wss = new ws_1.WebSocketServer({ port: 4000 });
 const redis = new ioredis_1.default();
-redis.subscribe("trades", (error) => {
-    if (error) {
-        console.log(error);
+redis.subscribe("trades", (err) => {
+    if (err) {
+        console.log(err);
     }
     else {
-        console.log("Successfully signed into trades channel");
+        console.log("Successfully subscribed");
     }
 });
 redis.on("message", (channel, message) => {
-    if (channel === "trades") {
+    if (channel == "trades") {
         wss.clients.forEach((client) => {
-            if (client.readyState === ws_1.WebSocket.OPEN) {
+            if (client.readyState === WebSocket.OPEN) {
                 client.send(message);
             }
         });

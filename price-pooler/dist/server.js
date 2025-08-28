@@ -9,7 +9,7 @@ const ioredis_1 = __importDefault(require("ioredis"));
 const { Pool } = pg_1.default;
 const redis = new ioredis_1.default();
 const markets = ["SOLUSDT", "ETHUSDT", "BTCUSDT"];
-const stream = markets.map((m) => `${m}@trade`).join("/");
+const stream = markets.map((m) => `${m.toLowerCase()}@trade`).join("/");
 const url = `wss://stream.binance.com:9443/stream?streams=${stream}`;
 const pool = new Pool({
     host: "localhost",
@@ -29,6 +29,7 @@ tradeWs.onopen = () => {
 const updates = [];
 setInterval(async () => {
     const batch = updates.splice(0, updates.length);
+    console.log(batch.length);
     for (const update of batch) {
         const { trade } = update;
         try {
