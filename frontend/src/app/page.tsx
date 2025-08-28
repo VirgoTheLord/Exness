@@ -48,7 +48,7 @@ const CandlePage = () => {
     const fetchBalance = async () => {
       try {
         const res = await fetch(
-          "http://localhost:9000/user/balance?user=user1"
+          "http://localhost:9000/trade/balance?user=user1"
         );
         const data = await res.json();
         if (res.ok) {
@@ -151,7 +151,6 @@ const CandlePage = () => {
     return () => clearInterval(intervalId);
   }, [selectedSymbol, selectedInterval]);
 
-  // WebSocket for live ask/bid directly from stream
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:4000");
 
@@ -194,7 +193,6 @@ const CandlePage = () => {
     <div className="bg-neutral-900 w-screen h-screen">
       <Navbar />
       <div className="p-4 flex gap-4">
-        {/* Candlestick chart */}
         <div className="flex-1 bg-black p-5 rounded-md">
           <div className="flex justify-end mb-4 items-center">
             <div>
@@ -225,13 +223,11 @@ const CandlePage = () => {
           )}
         </div>
 
-        {/* Sidebar */}
         <div className="w-72 bg-black p-4 rounded text-white flex flex-col space-y-4">
           <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
             Balance: ${liveBalance.toFixed(2)}
           </h3>
 
-          {/* Buy Section */}
           <div className="space-y-2">
             <label className="block text-sm">Quantity:</label>
             <input
@@ -240,15 +236,16 @@ const CandlePage = () => {
               onChange={(e) => setQuantity(Number(e.target.value))}
               className="w-full px-3 py-1 bg-neutral-800 text-white rounded"
             />
-            <button
-              onClick={handleBuy}
-              className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded"
-            >
-              Buy {selectedSymbol}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleBuy}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded"
+              >
+                Buy {selectedSymbol}
+              </button>
+            </div>
           </div>
 
-          {/* Holdings Section */}
           {holdings && (
             <div className="mt-4 border-t border-neutral-700 pt-3">
               <p>
@@ -263,7 +260,6 @@ const CandlePage = () => {
             </div>
           )}
 
-          {/* Markets Table */}
           <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
             Markets
           </h3>
