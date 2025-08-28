@@ -1,13 +1,7 @@
 import express from "express";
+import { users, User } from "../types/all";
 
 const userRouter = express.Router();
-
-interface user {
-  name: string;
-  password: string;
-  email: string;
-}
-let users: user[] = [];
 
 userRouter.post("/signup", (req, res) => {
   const { name, email, password } = req.body;
@@ -21,19 +15,42 @@ userRouter.post("/signup", (req, res) => {
     return res.status(400).json({ message: "User already exists" });
   }
 
-  users.push({ name, email, password });
-  return res.json({ message: "Signup successful" });
+  const newUser: User = {
+    id: users.length + 1,
+    name,
+    email,
+    password,
+    balance: { amount: 0 },
+  };
+
+  users.push(newUser);
+  return res.json({ message: "Signup successful", userId: newUser.id });
 });
 
 userRouter.post("/signin", (req, res) => {
   const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password required" });
+  }
 
   const user = users.find((u) => u.email === email && u.password === password);
   if (!user) {
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
-  return res.json({ message: "Signin successful" });
+  return res.json({ message: "Signin successful", userId: user.id });
+});
+
+userRouter.get("/balance/:userId", (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+
+  const user = users.find((u) => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  return res.json({ balance: user.balance });
 });
 
 export default userRouter;

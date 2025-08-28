@@ -1,317 +1,243 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
+import axios from "axios";
+import CandleChart from "@/components/Charts";
 import Navbar from "@/components/Navbar";
+import PriceTable from "@/components/PriceTable";
+import Orders from "@/components/Orders";
 
-const ApexCharts = dynamic(() => import("react-apexcharts"), { ssr: false });
+import { candle } from "@/types/Charts";
+import { Prices } from "@/types/Prices";
+import { Order, Trade } from "@/types/Order";
 
-interface Candle {
-  timestamp: string;
-  open_price: string;
-  high_price: string;
-  low_price: string;
-  close_price: string;
-}
+const Page = () => {
+  const user = {
+    id: 1,
+    name: "Admin User",
+    email: "admin@example.com",
+    password: "password123",
+  };
+  const markets = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+  const intervals = ["1m", "5m", "10m", "30m"];
 
-interface MarketData {
-  lastPrice: number | null;
-  ask?: number;
-  bid?: number;
-  prevAsk?: number;
-  prevBid?: number;
-}
-
-const CandlePage = () => {
-  const [candles, setCandles] = useState<
-    { x: Date; y: [number, number, number, number] }[]
-  >([]);
-  const [selectedSymbol, setSelectedSymbol] = useState("SOLUSDT");
-  const [selectedInterval, setSelectedInterval] = useState("1m");
-  const [marketData, setMarketData] = useState<Record<string, MarketData>>({
-    SOLUSDT: { lastPrice: null },
-    BTCUSDT: { lastPrice: null },
-    ETHUSDT: { lastPrice: null },
-  });
+  const [candles, setCandles] = useState<candle[]>([]);
+  const [prices, setPrices] = useState<Prices[]>([
+    { symbol: "BTCUSDT", ask: 0, bid: 0, status: "up" },
+    { symbol: "ETHUSDT", ask: 0, bid: 0, status: "up" },
+    { symbol: "SOLUSDT", ask: 0, bid: 0, status: "up" },
+  ]);
+  const [market, setMarket] = useState(markets[0]);
+  const [selectedInterval, setSelectedInterval] = useState(intervals[0]);
   const [quantity, setQuantity] = useState(0);
   const [balance, setBalance] = useState(0);
-  const [liveBalance, setLiveBalance] = useState(0);
-  const [holdings, setHoldings] = useState<{
-    symbol: string;
-    qty: number;
-  } | null>(null);
-
-  const markets = ["SOLUSDT", "BTCUSDT", "ETHUSDT"];
-  const intervals = ["1m", "5m", "10m", "30m"];
+  const [positions, setPositions] = useState<Order[]>([]);
+  const [pnlPositions, setPnlPositions] = useState<(Order & { pnl: number })[]>(
+    []
+  );
 
   useEffect(() => {
     const fetchBalance = async () => {
-      try {
-        const res = await fetch(
-          "http://localhost:9000/trade/balance?user=user1"
-        );
-        const data = await res.json();
-        if (res.ok) {
-          setBalance(data.balance);
-          setLiveBalance(data.balance);
-        } else {
-          console.error("Failed to fetch balance:", data.error);
-        }
-      } catch (err) {
-        console.error("Balance fetch error:", err);
-      }
+      const response = await axios.get(
+        `http://localhost:9000/user/balance/${user.id}`
+      );
+      setBalance(response.data.balance.amount);
     };
-
     fetchBalance();
   }, []);
 
-  const handleBuy = async () => {
-    if (quantity <= 0) return;
-    try {
-      const res = await fetch("http://localhost:9000/trade/buy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user: "user1",
-          symbol: selectedSymbol,
-          quantity,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setBalance(data.remainingBalance);
-        setHoldings({ symbol: selectedSymbol, qty: quantity });
-        setQuantity(0);
-      } else {
-        alert(data.error || "Failed to buy");
-      }
-    } catch (err) {
-      console.error("Buy error:", err);
-    }
-  };
-
-  const handleCloseOrder = async () => {
-    if (!holdings) return;
-
-    try {
-      const res = await fetch("http://localhost:9000/trade/close", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user: "user1",
-          symbol: holdings.symbol,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setBalance(data.finalBalance);
-        setLiveBalance(data.finalBalance);
-        setHoldings(null);
-      } else {
-        alert(data.error || "Failed to close order");
-      }
-    } catch (err) {
-      console.error("Close order error:", err);
-    }
-  };
-
   useEffect(() => {
-    const fetchCandles = async () => {
+    const fetchPositions = async () => {
       try {
-        const res = await fetch(
-          `http://localhost:9000/candles/${selectedSymbol}/${selectedInterval}`
+        const { data } = await axios.get<Order[]>(
+          `http://localhost:9000/trade/orders/${user.id}`
         );
-        const data: Candle[] = await res.json();
-
-        if (data.length > 0) {
-          const formatted = data.map((c) => ({
-            x: new Date(c.timestamp),
-            y: [
-              parseFloat(c.open_price),
-              parseFloat(c.high_price),
-              parseFloat(c.low_price),
-              parseFloat(c.close_price),
-            ] as [number, number, number, number],
-          }));
-          setCandles(formatted);
-        } else {
-          setCandles([]);
-        }
-      } catch {
-        setCandles([]);
+        setPositions(data);
+      } catch (error) {
+        console.error("Failed to fetch positions:", error);
       }
     };
-
-    fetchCandles();
-    const intervalId = setInterval(fetchCandles, 60000);
-    return () => clearInterval(intervalId);
-  }, [selectedSymbol, selectedInterval]);
+    fetchPositions();
+  }, []);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:4000");
-
-    ws.onmessage = (event) => {
-      const trade = JSON.parse(event.data);
-      const symbol = trade.s;
-      const ask = parseFloat(trade.ask);
-      const bid = parseFloat(trade.bid);
-
-      setMarketData((prev) => ({
-        ...prev,
-        [symbol]: {
-          lastPrice: parseFloat(trade.p),
-          prevAsk: prev[symbol]?.ask ?? ask,
-          prevBid: prev[symbol]?.bid ?? bid,
-          ask,
-          bid,
-        },
-      }));
-
-      if (holdings && holdings.symbol === symbol && bid) {
-        setLiveBalance(balance + holdings.qty * bid);
+    const fetchCandles = async (market: string, interval: string) => {
+      try {
+        const { data } = await axios.get<candle[]>(
+          `http://localhost:9000/candles/${market}/${interval}`
+        );
+        setCandles(data);
+      } catch (error) {
+        console.log(error);
       }
     };
+    fetchCandles(market, selectedInterval);
+    const intervalId = setInterval(
+      () => fetchCandles(market, selectedInterval),
+      60000
+    );
+    return () => clearInterval(intervalId);
+  }, [market, selectedInterval]);
 
-    return () => ws.close();
-  }, [holdings, balance]);
+  useEffect(() => {
+    const wss = new WebSocket("ws://localhost:4000");
+    wss.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      setPrices((prevPrices) =>
+        prevPrices.map((p) =>
+          p.symbol === message.symbol
+            ? {
+                ...p,
+                ask: message.ask,
+                bid: message.bid,
+                status:
+                  message.ask > p.ask
+                    ? "up"
+                    : message.ask < p.ask
+                    ? "down"
+                    : p.status,
+              }
+            : p
+        )
+      );
+    };
+    return () => wss.close();
+  }, []);
 
-  const options = {
-    chart: {
-      type: "candlestick" as const,
-      height: 350,
-      toolbar: { show: false },
-    },
-    xaxis: { type: "datetime" as const },
-    yaxis: { tooltip: { enabled: true } },
+  useEffect(() => {
+    const calculatePnL = (positions: Order[], prices: Prices[]) =>
+      positions.map((pos) => {
+        const current = prices.find((p) => p.symbol === pos.asset);
+        const currentBid = current?.bid ?? 0;
+        return { ...pos, pnl: (currentBid - pos.buy) * pos.quantity };
+      });
+    setPnlPositions(calculatePnL(positions, prices));
+  }, [positions, prices]);
+  const totalPnL = pnlPositions.reduce((sum, pos) => sum + pos.pnl, 0);
+  const displayBalance = balance + totalPnL;
+
+  const handleLong = async (quantity: number, asset: string, type: string) => {
+    try {
+      const response = await axios.post(
+        `http://localhost:9000/trade/order/${type}`,
+        { quantity, asset, id: user.id }
+      );
+      setPositions((prev) => [
+        ...prev,
+        {
+          orderId: prev.length + 1,
+          id: user.id,
+          type: type === "long" ? Trade.LONG : Trade.SHORT,
+          asset: asset.toUpperCase(),
+          buy: response.data.buyPrice,
+          quantity,
+        },
+      ]);
+    } catch (error: any) {
+      if (error.response?.status === 400) alert(error.response.data.message);
+    }
+  };
+  const handleClose = async (orderId: number, type: string) => {
+    try {
+      const response = await axios.post(
+        `http://localhost:9000/trade/close/${type}`,
+        {
+          id: user.id,
+          orderId,
+        }
+      );
+
+      setBalance(response.data.balance);
+      setPositions((prev) => prev.filter((order) => order.orderId !== orderId));
+
+      alert(
+        `Order closed! PnL: ${response.data.pnl.toFixed(
+          2
+        )}, New Balance: ${response.data.balance.toFixed(2)}`
+      );
+    } catch (error: any) {
+      alert(error.response?.data?.message || "Failed to close order");
+    }
   };
 
   return (
-    <div className="bg-neutral-900 w-screen h-screen">
-      <Navbar />
-      <div className="p-4 flex gap-4">
-        <div className="flex-1 bg-black p-5 rounded-md">
-          <div className="flex justify-end mb-4 items-center">
+    <div className="flex flex-col min-h-screen w-full bg-gray-100 overflow-x-hidden">
+      <Navbar balance={displayBalance} />
+
+      <div className="flex flex-1 gap-4 p-4 min-h-[90vh] flex-wrap">
+        <div className="relative flex-1 min-w-0">
+          <CandleChart candles={candles} />
+          <div className="absolute top-4 right-4 z-10 flex gap-4 flex-wrap">
             <div>
-              <label className="text-white mr-2">Interval:</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Market
+              </label>
               <select
-                className="bg-gray-700 text-white px-3 py-1 rounded"
+                value={market}
+                onChange={(e) => setMarket(e.target.value)}
+                className="w-full bg-white border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 shadow-sm"
+              >
+                {markets.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Interval
+              </label>
+              <select
                 value={selectedInterval}
                 onChange={(e) => setSelectedInterval(e.target.value)}
+                className="w-full bg-white border border-gray-300 text-gray-900 text-sm rounded-lg block p-2.5 shadow-sm"
               >
-                {intervals.map((intv) => (
-                  <option key={intv}>{intv}</option>
+                {intervals.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
                 ))}
               </select>
             </div>
           </div>
-
-          {candles.length > 0 ? (
-            <ApexCharts
-              options={options}
-              series={[{ data: candles }]}
-              type="candlestick"
-              height={400}
-            />
-          ) : (
-            <div className="text-white text-center py-16 h-[400px] flex items-center justify-center">
-              Loading candle data for {selectedSymbol}...
-            </div>
-          )}
         </div>
 
-        <div className="w-72 bg-black p-4 rounded text-white flex flex-col space-y-4">
-          <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
-            Balance: ${liveBalance.toFixed(2)}
-          </h3>
-
-          <div className="space-y-2">
-            <label className="block text-sm">Quantity:</label>
+        <div className="w-full md:w-1/4 overflow-y-auto flex-shrink-0 min-w-0">
+          <PriceTable prices={prices} />
+          <div className="mt-4 flex flex-col gap-2">
+            <h1>Enter a quantity to perform trade:</h1>
+            <h2>Buy: {market} at</h2>
             <input
               type="number"
+              placeholder="Enter quantity"
               value={quantity}
               onChange={(e) => setQuantity(Number(e.target.value))}
-              className="w-full px-3 py-1 bg-neutral-800 text-white rounded"
+              className="border p-2 rounded w-full"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-2 mt-2">
               <button
-                onClick={handleBuy}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded"
+                onClick={() => handleLong(quantity, market, "long")}
+                className="bg-green-500 text-white px-4 py-2 rounded flex-1"
               >
-                Buy {selectedSymbol}
+                Long
+              </button>
+              <button
+                onClick={() => handleLong(quantity, market, "short")}
+                className="bg-red-500 text-white px-4 py-2 rounded flex-1"
+              >
+                Short
               </button>
             </div>
-          </div>
-
-          {holdings && (
-            <div className="mt-4 border-t border-neutral-700 pt-3">
-              <p>
-                Holding: {holdings.qty} {holdings.symbol}
-              </p>
-              <button
-                onClick={handleCloseOrder}
-                className="mt-2 w-full bg-red-600 hover:bg-red-700 px-3 py-2 rounded"
-              >
-                Close Order
-              </button>
-            </div>
-          )}
-
-          <h3 className="text-lg font-semibold border-b border-neutral-800 pb-2">
-            Markets
-          </h3>
-          <div className="space-y-2">
-            {markets.map((symbol) => {
-              const data = marketData[symbol];
-              const ask = data.ask;
-              const bid = data.bid;
-              const prevAsk = data.prevAsk;
-              const prevBid = data.prevBid;
-
-              const askColor =
-                ask && prevAsk
-                  ? ask > prevAsk
-                    ? "text-green-500"
-                    : "text-red-500"
-                  : "text-neutral-400";
-              const bidColor =
-                bid && prevBid
-                  ? bid > prevBid
-                    ? "text-green-500"
-                    : "text-red-500"
-                  : "text-neutral-400";
-
-              return (
-                <div
-                  key={symbol}
-                  onClick={() => setSelectedSymbol(symbol)}
-                  className={`p-2 rounded-md cursor-pointer border border-neutral-700 hover:bg-neutral-800/50`}
-                >
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-semibold">{symbol}</span>
-                    <span className="text-sm font-mono">
-                      Last: {data.lastPrice?.toFixed(2) ?? "..."}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm font-mono">
-                    <span className={askColor}>
-                      Ask: {ask?.toFixed(2) ?? "..."}
-                    </span>
-                    <span className={bidColor}>
-                      Bid: {bid?.toFixed(2) ?? "..."}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </div>
+      </div>
+
+      <div className="w-full bg-white border-t border-gray-200 p-4 overflow-x-auto">
+        <Orders positions={positions} prices={prices} onClose={handleClose} />
       </div>
     </div>
   );
 };
 
-export default CandlePage;
+export default Page;
