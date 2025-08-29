@@ -29,6 +29,9 @@ export type orders = {
   type: Trade;
   asset: string;
   buy: number;
+  margin?: number;
+  leverage?: number;
+  liquidationPrice?: number;
   quantity: number;
 };
 

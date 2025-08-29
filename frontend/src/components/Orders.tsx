@@ -1,7 +1,6 @@
 import React from "react";
 import { Order } from "@/types/Order";
 import { Prices } from "@/types/Prices";
-import axios from "axios";
 
 interface OrdersProps {
   positions: Order[];

@@ -1,13 +1,16 @@
 export enum Trade {
-  LONG = "long",
-  SHORT = "short",
+  LONG = "LONG",
+  SHORT = "SHORT",
 }
 
 export interface Order {
   orderId: number;
-  id: number;
+  id: number; // User ID
   type: Trade;
   asset: string;
-  buy: number;
+  buy: number; // Entry Price
+  margin?: number;
   quantity: number;
+  leverage?: number;
+  liquidationPrice?: number;
 }
